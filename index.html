@@ -1,0 +1,134 @@
+
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JIPITI AI</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#090b12;color:#f5f5ff;font-family:Arial,sans-serif}
+header{padding:25px 18px;background:linear-gradient(135deg,#30205c,#111827)}
+h1{margin:0;font-size:30px}h1 span{color:#ae96ff}
+p{color:#b9bfd2}
+main{max-width:850px;margin:auto;padding:18px}
+button,.upload{display:inline-block;border:0;border-radius:10px;padding:12px 15px;margin:4px;background:#a48bff;color:#100b20;font-weight:bold;cursor:pointer}
+input[type=search]{width:100%;padding:14px;border-radius:10px;border:1px solid #33394b;background:#171b29;color:white;margin:12px 0}
+input[type=file]{display:none}
+nav{margin-bottom:20px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.card{background:#171b29;border:1px solid #30354a;border-radius:12px;overflow:hidden}
+.card img{width:100%;height:170px;object-fit:cover;cursor:pointer}
+.card div{padding:10px;overflow-wrap:anywhere}
+.card small{color:#aeb5ca}
+.delete{background:#47202c;color:#ffd8df}
+#camera{display:none}
+video,canvas{width:100%;max-height:420px;background:#000;border-radius:12px}
+#viewer{display:none;position:fixed;inset:0;background:#000e;align-items:center;justify-content:center;padding:15px}
+#viewer img{max-width:100%;max-height:85vh}
+@media(min-width:600px){.grid{grid-template-columns:repeat(3,1fr)}}
+</style>
+</head>
+<body>
+<header><h1>JIPITI <span>AI</span></h1><p>Galeri foto dan dunia anime kamu.</p></header>
+<main>
+<nav>
+<button onclick="page('gallery')">Galeri Foto</button>
+<button onclick="page('camera')">Kamera Anime</button>
+</nav>
+<section id="gallery">
+<h2>Galeri Saya</h2>
+<input id="search" type="search" placeholder="Cari foto..." oninput="render()">
+<label class="upload">＋ Unggah Foto<input id="files" type="file" accept="image/*" multiple></label>
+<p>Foto disimpan di browser HP ini.</p>
+<div class="grid" id="grid"></div>
+</section>
+<section id="camera">
+<h2>Kamera ilustrasi</h2>
+<p>Efek posterisasi sederhana, bukan transformasi anime AI generatif.</p>
+<button onclick="startCamera()">Buka Kamera</button>
+<button onclick="capture()">Ambil Foto</button>
+<button onclick="stopCamera()">Matikan Kamera</button>
+<video id="video" autoplay playsinline muted></video>
+<canvas id="canvas" style="display:none"></canvas>
+</section>
+</main>
+<div id="viewer" onclick="this.style.display='none'"><img id="big"></div>
+<script>
+let db,stream;
+const request=indexedDB.open('JipitiDB',1);
+request.onupgradeneeded=()=>request.result.createObjectStore('photos',{keyPath:'id',autoIncrement:true});
+request.onsuccess=()=>{db=request.result;render()};
+function addPhoto(name,blob){
+return new Promise(resolve=>{
+let tx=db.transaction('photos','readwrite');
+tx.objectStore('photos').add({name,blob});
+tx.oncomplete=resolve;
+});
+}
+function getPhotos(){
+return new Promise(resolve=>{
+let r=db.transaction('photos').objectStore('photos').getAll();
+r.onsuccess=()=>resolve(r.result);
+});
+}
+async function render(){
+if(!db)return;
+let items=await getPhotos(),q=document.getElementById('search').value.toLowerCase();
+let grid=document.getElementById('grid');grid.replaceChildren();
+items.filter(x=>x.name.toLowerCase().includes(q)).forEach(x=>{
+let card=document.createElement('div');card.className='card';
+let img=document.createElement('img');img.src=URL.createObjectURL(x.blob);
+img.onclick=()=>{document.getElementById('big').src=img.src;document.getElementById('viewer').style.display='flex'};
+let box=document.createElement('div'),name=document.createElement('strong');
+name.textContent=x.name;
+let del=document.createElement('button');del.textContent='Hapus';del.className='delete';
+del.onclick=async()=>{
+if(confirm('Hapus foto ini?')){
+let tx=db.transaction('photos','readwrite');
+tx.objectStore('photos').delete(x.id);
+tx.oncomplete=render;
+}};
+box.append(name,document.createElement('br'),del);card.append(img,box);grid.append(card);
+});
+if(!grid.children.length)grid.innerHTML='<p>Belum ada foto. Unggah foto untuk memulai.</p>';
+}
+document.getElementById('files').onchange=async e=>{
+for(let f of e.target.files){
+if(f.type.startsWith('image/'))await addPhoto(f.name,f);
+}
+e.target.value='';render();
+};
+function page(p){
+document.getElementById('gallery').style.display=p==='gallery'?'block':'none';
+document.getElementById('camera').style.display=p==='camera'?'block':'none';
+}
+async function startCamera(){
+try{
+stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'user'},audio:false});
+document.getElementById('video').srcObject=stream;
+}catch(e){alert('Kamera tidak tersedia. Pastikan izin kamera aktif dan website menggunakan HTTPS.')}
+}
+function stopCamera(){
+if(stream)stream.getTracks().forEach(t=>t.stop());
+stream=null;document.getElementById('video').srcObject=null;
+}
+async function capture(){
+let v=document.getElementById('video');
+if(!v.videoWidth){alert('Buka kamera terlebih dahulu.');return}
+let c=document.createElement('canvas');c.width=v.videoWidth;c.height=v.videoHeight;
+let ctx=c.getContext('2d');ctx.drawImage(v,0,0);
+let pixels=ctx.getImageData(0,0,c.width,c.height);
+for(let i=0;i<pixels.data.length;i+=4){
+for(let k=0;k<3;k++)pixels.data[i+k]=Math.round(pixels.data[i+k]/48)*48;
+}
+ctx.putImageData(pixels,0,0);
+c.toBlob(async b=>{
+await addPhoto('Foto Kamera '+new Date().toLocaleString('id-ID'),b);
+page('gallery');render();
+},'image/jpeg',0.9);
+}
+</script>
+</body>
+  </html>
+  
